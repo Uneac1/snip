@@ -120,27 +120,18 @@ async function loginMisub(page) {
 }
 
 async function tagDfsniCard(page) {
-  const tagged = await page.evaluate(() => {
-    const matches = Array.from(document.querySelectorAll("*")).filter((el) => {
-      const text = (el.textContent || "").trim().toLowerCase();
-      return text.includes("dfsni");
+  const title = page.getByText(/^Dfsni$/).first();
+  await title.waitFor({ state: "visible", timeout: 30000 });
+
+  const tagged = await title.evaluate((titleNode) => {
+    document.querySelectorAll("[data-codex-dfsni-card='true']").forEach((el) => {
+      el.removeAttribute("data-codex-dfsni-card");
     });
 
-    for (const match of matches) {
-      let node = match;
-      while (node && node !== document.body) {
-        const hasButtons =
-          node.querySelector("button,[role='button'],svg") &&
-          node.querySelector("input,textarea") === null;
-        if (hasButtons) {
-          node.setAttribute("data-codex-dfsni-card", "true");
-          return true;
-        }
-        node = node.parentElement;
-      }
-    }
-
-    return false;
+    const card = titleNode.closest(".group");
+    if (!card) return false;
+    card.setAttribute("data-codex-dfsni-card", "true");
+    return true;
   });
 
   if (!tagged) {
@@ -153,8 +144,8 @@ async function openEditor(page) {
   await card.waitFor({ state: "visible", timeout: 30000 });
 
   const editCandidates = [
-    card.getByRole("button").first(),
     card.locator("button").first(),
+    card.getByRole("button", { name: /edit/i }).first(),
     card.locator("svg").first()
   ];
 
@@ -172,15 +163,18 @@ async function openEditor(page) {
 }
 
 async function replaceSubscriptionUrl(page, url) {
-  const visibleField = page
-    .locator("textarea:visible, input[type='text']:visible, input:not([type]):visible")
-    .last();
-  await visibleField.waitFor({ state: "visible", timeout: 30000 });
-  await visibleField.fill(url);
+  const modalTitle = page.getByText("编辑订阅").last();
+  await modalTitle.waitFor({ state: "visible", timeout: 30000 });
+
+  const modal = page.locator(".fixed.inset-0").last();
+  const urlField = modal.locator("input[type='text']").nth(1);
+  await urlField.waitFor({ state: "visible", timeout: 30000 });
+  await urlField.fill(url);
 
   const confirmCandidates = [
-    page.getByRole("button", { name: /confirm|submit|save|update|ok/i }).last(),
-    page.locator("button:visible").last()
+    modal.locator("button").last(),
+    modal.getByRole("button", { name: /confirm|submit|save|update|ok/i }).last(),
+    modal.locator("button").last()
   ];
 
   for (const candidate of confirmCandidates) {
@@ -199,8 +193,16 @@ async function verifyUpdate(page, url) {
   await page.waitForLoadState("networkidle", { timeout: 30000 }).catch(() => {});
   await tagDfsniCard(page);
   const card = page.locator("[data-codex-dfsni-card='true']").first();
-  const urlPattern = new RegExp(escapeRegExp(url));
-  await card.getByText(urlPattern).waitFor({ state: "visible", timeout: 30000 });
+  await expectCardInputValue(card, url);
+}
+
+async function expectCardInputValue(card, expectedUrl) {
+  const input = card.locator("input[type='text']").first();
+  await input.waitFor({ state: "visible", timeout: 30000 });
+  const actualValue = await input.inputValue();
+  if (actualValue !== expectedUrl) {
+    throw new Error(`Dfsni link did not update as expected. Current value: ${actualValue}`);
+  }
 }
 
 async function main() {
